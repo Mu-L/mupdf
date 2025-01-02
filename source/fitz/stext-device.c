@@ -151,11 +151,13 @@ const char *fz_stext_options_usage =
 	"\tdehyphenate: attempt to join up hyphenated words\n"
 	"\tuse-cid-for-unknown-unicode: guess unicode from cid if normal mapping fails\n"
 	"\tclip: do not include text that is completely clipped\n"
+	"\tclip=x0:y0:x1:y1 specify clipping rectangle within which to collect content\n"
 	"\tstructured=no: don't collect structure data\n"
 	"\taccurate-bboxes=no: calculate char bboxes for from the outlines\n"
 	"\tvectors=no: include vector bboxes in output\n"
 	"\tsegment=no: don't attempt to segment the page\n"
 	"\ttable-hunt: hunt for tables within a (segmented) page\n"
+	"\tcollect-flags: attempt to detect text features (fake bold, strikeout, underlined etc)\n"
 	"\n";
 
 /* Find the current actualtext, if any. Will abort if dev == NULL. */
@@ -949,6 +951,7 @@ do_extract(fz_context *ctx, fz_stext_device *dev, fz_text_span *span, fz_matrix 
 		if (dev->flags & FZ_STEXT_CLIP)
 		{
 			fz_rect r = fz_device_current_scissor(ctx, &dev->super);
+			r = fz_intersect_rect(r, dev->opts.clip);
 			r = fz_intersect_rect(r, dev->page->mediabox);
 			if (fz_glyph_entirely_outside_box(ctx, &ctm, span, &span->items[i], &r))
 			{
@@ -1126,6 +1129,7 @@ do_extract_within_actualtext(fz_context *ctx, fz_stext_device *dev, fz_text_span
 		if (dev->flags & FZ_STEXT_CLIP)
 		{
 			fz_rect r = fz_device_current_scissor(ctx, &dev->super);
+			r = fz_intersect_rect(r, dev->opts.clip);
 			r = fz_intersect_rect(r, dev->page->mediabox);
 			if (fz_glyph_entirely_outside_box(ctx, &ctm, span, &span->items[i], &r))
 			{
@@ -1468,6 +1472,7 @@ fz_stext_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, fz_matrix 
 
 	local_ctm = ctm;
 	scissor = fz_device_current_scissor(ctx, dev);
+	scissor = fz_intersect_rect(scissor, tdev->opts.clip);
 	scissor = fz_intersect_rect(scissor, tdev->page->mediabox);
 	image = fz_new_image_from_shade(ctx, shade, &local_ctm, color_params, scissor);
 	fz_try(ctx)
@@ -1542,6 +1547,34 @@ fz_stext_drop_device(fz_context *ctx, fz_device *dev)
 		pop_metatext(ctx, tdev);
 }
 
+static int
+val_is_rect(const char *val, fz_rect *rp)
+{
+	fz_rect r;
+	const char *s;
+
+	s = strchr(val, ':');
+	if (s == NULL || s == val)
+		return 0;
+	r.x0 = fz_atof(val);
+	val = s+1;
+	s = strchr(val, ':');
+	if (s == NULL || s == val)
+		return 0;
+	r.y0 = fz_atof(val);
+	val = s+1;
+	s = strchr(val, ':');
+	if (s == NULL || s == val)
+		return 0;
+	r.x1 = fz_atof(val);
+	val = s+1;
+	r.y1 = fz_atof(val);
+
+	*rp = r;
+
+	return 1;
+}
+
 fz_stext_options *
 fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *string)
 {
@@ -1581,10 +1614,18 @@ fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *stri
 		opts->flags |= FZ_STEXT_COLLECT_STYLES;
 
 	opts->flags |= FZ_STEXT_CLIP;
+	opts->clip = fz_infinite_rect;
 	if (fz_has_option(ctx, string, "mediabox-clip", &val))
 	{
 		fz_warn(ctx, "The 'mediabox-clip' option has been deprecated. Use 'clip' instead.");
 		if (fz_option_eq(val, "no"))
+			opts->flags ^= FZ_STEXT_CLIP;
+	}
+	if (fz_has_option(ctx, string, "clip", &val))
+	{
+		if (fz_option_eq(val, "no"))
+			opts->flags ^= FZ_STEXT_CLIP;
+		else if (val_is_rect(val, &opts->clip))
 			opts->flags ^= FZ_STEXT_CLIP;
 	}
 	if (fz_has_option(ctx, string, "clip", &val) && fz_option_eq(val, "no"))

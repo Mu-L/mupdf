@@ -592,6 +592,7 @@ typedef struct
 {
 	int flags;
 	float scale;
+	fz_rect clip;
 } fz_stext_options;
 
 /**
